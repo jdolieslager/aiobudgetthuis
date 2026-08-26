@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import re
 import secrets
 import time
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urljoin, urlparse
 from zoneinfo import ZoneInfo
 
@@ -32,6 +33,7 @@ from .models import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from datetime import datetime
 
 CLIENT_ID = "mobile"
@@ -50,6 +52,10 @@ _ANTIFORGERY_RE = re.compile(r'name="__RequestVerificationToken"[^>]*value="([^"
 _REDIRECTS = (301, 302, 303, 307, 308)
 _TIMEOUT = aiohttp.ClientTimeout(total=30)
 _HTTP_OK = 200
+# Total-timeout expiry raises TimeoutError, and a JSON body that fails to decode
+# raises json.JSONDecodeError; neither is an aiohttp.ClientError, so both must be
+# caught explicitly to keep the "package error types only" contract.
+_TRANSPORT_ERRORS = (TimeoutError, aiohttp.ClientError, json.JSONDecodeError)
 
 
 class BudgetThuisError(Exception):
@@ -77,6 +83,15 @@ def _pkce() -> tuple[str, str]:
 def _qp(url: str, key: str) -> str | None:
     values = parse_qs(urlparse(url).query).get(key)
     return values[0] if values else None
+
+
+def _parse[T](factory: Callable[[dict], T], data: dict, what: str) -> T:
+    # The API is unofficial; a shape change must surface as a package error,
+    # not a stray KeyError/TypeError from deep inside a from_dict.
+    try:
+        return factory(data)
+    except (AttributeError, KeyError, TypeError, ValueError) as err:
+        raise BudgetThuisConnectionError(f"{what}: malformed payload") from err
 
 
 class BudgetThuisClient:
@@ -168,7 +183,7 @@ class BudgetThuisClient:
                         "client_id": CLIENT_ID,
                     },
                 )
-        except aiohttp.ClientError as err:
+        except _TRANSPORT_ERRORS as err:
             raise BudgetThuisConnectionError(str(err)) from err
 
     async def refresh(self, refresh_token: str) -> Tokens:
@@ -182,7 +197,7 @@ class BudgetThuisClient:
                     "client_id": CLIENT_ID,
                 },
             )
-        except aiohttp.ClientError as err:
+        except _TRANSPORT_ERRORS as err:
             raise BudgetThuisConnectionError(str(err)) from err
         if not tokens.refresh_token:
             tokens.refresh_token = refresh_token  # server may not rotate
@@ -208,7 +223,9 @@ class BudgetThuisClient:
                     raise BudgetThuisConnectionError(
                         f"contactPerson: status {r.status}"
                     )
-                relation_ids = relation_ids_from_contact_person(await r.json())
+                relation_ids = _parse(
+                    relation_ids_from_contact_person, await r.json(), "contactPerson"
+                )
 
             if not relation_ids:
                 return []
@@ -225,10 +242,14 @@ class BudgetThuisClient:
                         f"productPicker: status {r.status}"
                     )
                 data = await r.json()
-        except aiohttp.ClientError as err:
+        except _TRANSPORT_ERRORS as err:
             raise BudgetThuisConnectionError(str(err)) from err
 
-        return [Contract.from_dict(c) for c in data.get("contractsInfo", [])]
+        return _parse(
+            lambda d: [Contract.from_dict(c) for c in d.get("contractsInfo", [])],
+            data,
+            "productPicker",
+        )
 
     async def _get_json(
         self, access_token: str, path: str, params: dict | None = None
@@ -246,9 +267,12 @@ class BudgetThuisClient:
                     raise BudgetThuisAuthError(f"{path}: status {r.status}")
                 if r.status != _HTTP_OK:
                     raise BudgetThuisConnectionError(f"{path}: status {r.status}")
-                return cast("dict", await r.json())
-        except aiohttp.ClientError as err:
+                data = await r.json()
+        except _TRANSPORT_ERRORS as err:
             raise BudgetThuisConnectionError(str(err)) from err
+        if not isinstance(data, dict):
+            raise BudgetThuisConnectionError(f"{path}: unexpected payload shape")
+        return data
 
     async def hourly_tariff(
         self,
@@ -267,7 +291,7 @@ class BudgetThuisClient:
                 "PeriodTo": period_to.astimezone(_TZ).strftime(_PERIOD_FMT),
             },
         )
-        return HourlyTariffDetails.from_dict(data)
+        return _parse(HourlyTariffDetails.from_dict, data, "hourlytariff")
 
     async def monthly_amount(
         self, access_token: str, contract_id: str
@@ -276,7 +300,7 @@ class BudgetThuisClient:
         data = await self._get_json(
             access_token, f"/energy/v2/contract/{contract_id}/monthlyAmount"
         )
-        return MonthlyAmount.from_dict(data)
+        return _parse(MonthlyAmount.from_dict, data, "monthlyAmount")
 
     async def usage_summary(
         self,
@@ -295,7 +319,11 @@ class BudgetThuisClient:
                 "PeriodTo": period_to.astimezone(_TZ).strftime(_PERIOD_FMT),
             },
         )
-        return UsageSummary.from_days(usage_days_from_details(data))
+        return _parse(
+            lambda d: UsageSummary.from_days(usage_days_from_details(d)),
+            data,
+            "usagecosts",
+        )
 
     async def free_energy_status(
         self, access_token: str, contract_id: str
@@ -304,14 +332,14 @@ class BudgetThuisClient:
         data = await self._get_json(
             access_token, f"/energy/v2/freeEnergy/{contract_id}/status"
         )
-        return FreeEnergyStatus.from_dict(data)
+        return _parse(FreeEnergyStatus.from_dict, data, "freeEnergy")
 
     async def contract_info(self, access_token: str, contract_id: str) -> ContractInfo:
         """Fetch contract metadata (type, start date, standing charge)."""
         data = await self._get_json(
             access_token, f"/energy/v1/customer/{contract_id}/contract-info"
         )
-        return ContractInfo.from_dict(data)
+        return _parse(ContractInfo.from_dict, data, "contract-info")
 
     async def daily_reading_mandate(
         self, access_token: str, contract_id: str
@@ -320,7 +348,7 @@ class BudgetThuisClient:
         data = await self._get_json(
             access_token, f"/energy/v2/dailyReading/mandate/{contract_id}"
         )
-        return Mandate.from_dict(data)
+        return _parse(Mandate.from_dict, data, "mandate")
 
     # -- helpers ------------------------------------------------------------
     async def _token_request(
@@ -337,7 +365,7 @@ class BudgetThuisClient:
             if r.status != _HTTP_OK:
                 raise BudgetThuisConnectionError(f"token: status {r.status}")
             payload = await r.json()
-        return Tokens.from_payload(payload, time.time())
+        return _parse(lambda p: Tokens.from_payload(p, time.time()), payload, "token")
 
     @staticmethod
     def _location(response: aiohttp.ClientResponse, step: str) -> str:

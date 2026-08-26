@@ -108,3 +108,26 @@ def test_forecast_attributes():
     now = datetime(2026, 8, 26, 12, 30, tzinfo=TZ)
     assert len(pd.prices_for(now.date())) == 2
     assert pd.tomorrow_valid(now) is False
+
+
+def test_malformed_tariff_entries_are_skipped():
+    payload = {
+        "tariffDays": [
+            {
+                "tariffsOfDate": "2026-08-26T00:00:00+02:00",
+                "electricityTariffs": [
+                    {},  # no totalTariff
+                    {"totalTariff": {"amountGross": 0.30}},  # no period bounds
+                    {
+                        "totalTariff": {"amountGross": 0.30},
+                        "periodFrom": "2026-08-26T00:00:00+02:00",
+                        "periodTo": "2026-08-26T01:00:00+02:00",
+                    },
+                ],
+            }
+        ]
+    }
+    details = HourlyTariffDetails.from_dict(payload)
+    (day,) = details.days
+    (tariff,) = day.electricity
+    assert tariff.total.gross == 0.30

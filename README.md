@@ -1,5 +1,10 @@
 # aiobudgetthuis
 
+[![CI](https://github.com/jdolieslager/aiobudgetthuis/actions/workflows/ci.yaml/badge.svg)](https://github.com/jdolieslager/aiobudgetthuis/actions/workflows/ci.yaml)
+[![PyPI](https://img.shields.io/pypi/v/aiobudgetthuis)](https://pypi.org/project/aiobudgetthuis/)
+[![Python](https://img.shields.io/pypi/pyversions/aiobudgetthuis)](https://pypi.org/project/aiobudgetthuis/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Async Python client for the **unofficial** Budget Thuis (Budget Energie) API: hourly dynamic
 electricity prices, daily usage/solar production/cost, monthly installment, free-energy
 windows, and contract discovery.

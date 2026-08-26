@@ -101,11 +101,17 @@ class TariffDay:
 
     @classmethod
     def from_dict(cls, d: dict) -> TariffDay:
-        """Parse one tariffDays entry."""
+        """Parse one tariffDays entry, skipping individually malformed tariffs."""
+        electricity: list[Tariff] = []
+        for t in d.get("electricityTariffs") or []:
+            try:
+                electricity.append(Tariff.from_dict(t))
+            except (KeyError, TypeError, ValueError):
+                continue
         return cls(
             date=_dt(d["tariffsOfDate"]),
             reason_no_tariffs=d.get("reasonNoTariffs"),
-            electricity=[Tariff.from_dict(t) for t in d.get("electricityTariffs", [])],
+            electricity=electricity,
         )
 
 
