@@ -33,6 +33,9 @@ tests/            # pure-logic tests; all fixtures are fictional
 - The public surface is `__all__` in `__init__.py`. Breaking it requires a major/minor
   version bump per SemVer; consumers pin exact versions.
 - No logging inside the package; signal problems via `BudgetThuisError` subclasses.
+- `main` is PR-only (enforced by a ruleset): branch, push, open a PR, and merge once
+  CI is green. GitHub Actions steps are pinned to commit SHAs; bump the SHA and the
+  version comment together (Dependabot proposes these).
 
 ## Release procedure
 
