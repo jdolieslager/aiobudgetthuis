@@ -14,7 +14,7 @@ import re
 import secrets
 import time
 from typing import TYPE_CHECKING
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import parse_qs, quote, urljoin, urlparse
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -252,8 +252,10 @@ class BudgetThuisClient:
         )
 
     async def _get_json(
-        self, access_token: str, path: str, params: dict | None = None
+        self, access_token: str, path: str, label: str, params: dict | None = None
     ) -> dict:
+        # Error messages carry only the endpoint label: the path embeds the
+        # contract id, and callers put these messages in logs and issues.
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Accept": "application/json",
@@ -264,14 +266,14 @@ class BudgetThuisClient:
                 f"{self._api}{path}", params=params, headers=headers
             ) as r:
                 if r.status in (401, 403):
-                    raise BudgetThuisAuthError(f"{path}: status {r.status}")
+                    raise BudgetThuisAuthError(f"{label}: status {r.status}")
                 if r.status != _HTTP_OK:
-                    raise BudgetThuisConnectionError(f"{path}: status {r.status}")
+                    raise BudgetThuisConnectionError(f"{label}: status {r.status}")
                 data = await r.json()
         except _TRANSPORT_ERRORS as err:
             raise BudgetThuisConnectionError(str(err)) from err
         if not isinstance(data, dict):
-            raise BudgetThuisConnectionError(f"{path}: unexpected payload shape")
+            raise BudgetThuisConnectionError(f"{label}: unexpected payload shape")
         return data
 
     async def hourly_tariff(
@@ -284,7 +286,8 @@ class BudgetThuisClient:
         """Fetch hourly electricity tariffs for the given period."""
         data = await self._get_json(
             access_token,
-            f"/energy/v2/contract/{contract_id}/hourlytariff/details",
+            f"/energy/v2/contract/{quote(contract_id, safe='')}/hourlytariff/details",
+            "hourlytariff",
             {
                 "AddDayBeforeDayAfter": "false",
                 "PeriodFrom": period_from.astimezone(_TZ).strftime(_PERIOD_FMT),
@@ -298,7 +301,9 @@ class BudgetThuisClient:
     ) -> MonthlyAmount:
         """Fetch the monthly installment and its adjustment range."""
         data = await self._get_json(
-            access_token, f"/energy/v2/contract/{contract_id}/monthlyAmount"
+            access_token,
+            f"/energy/v2/contract/{quote(contract_id, safe='')}/monthlyAmount",
+            "monthlyAmount",
         )
         return _parse(MonthlyAmount.from_dict, data, "monthlyAmount")
 
@@ -312,7 +317,8 @@ class BudgetThuisClient:
         """Fetch per-day usage/production/cost for the period, aggregated."""
         data = await self._get_json(
             access_token,
-            f"/energy/v1/contract/{contract_id}/usagecosts/details",
+            f"/energy/v1/contract/{quote(contract_id, safe='')}/usagecosts/details",
+            "usagecosts",
             {
                 "PeriodDuration": "Day",
                 "PeriodFrom": period_from.astimezone(_TZ).strftime(_PERIOD_FMT),
@@ -330,14 +336,18 @@ class BudgetThuisClient:
     ) -> FreeEnergyStatus:
         """Fetch free-energy eligibility and upcoming windows."""
         data = await self._get_json(
-            access_token, f"/energy/v2/freeEnergy/{contract_id}/status"
+            access_token,
+            f"/energy/v2/freeEnergy/{quote(contract_id, safe='')}/status",
+            "freeEnergy",
         )
         return _parse(FreeEnergyStatus.from_dict, data, "freeEnergy")
 
     async def contract_info(self, access_token: str, contract_id: str) -> ContractInfo:
         """Fetch contract metadata (type, start date, standing charge)."""
         data = await self._get_json(
-            access_token, f"/energy/v1/customer/{contract_id}/contract-info"
+            access_token,
+            f"/energy/v1/customer/{quote(contract_id, safe='')}/contract-info",
+            "contract-info",
         )
         return _parse(ContractInfo.from_dict, data, "contract-info")
 
@@ -346,7 +356,9 @@ class BudgetThuisClient:
     ) -> Mandate:
         """Fetch the daily meter-reading mandate status."""
         data = await self._get_json(
-            access_token, f"/energy/v2/dailyReading/mandate/{contract_id}"
+            access_token,
+            f"/energy/v2/dailyReading/mandate/{quote(contract_id, safe='')}",
+            "dailyReadingMandate",
         )
         return _parse(Mandate.from_dict, data, "mandate")
 

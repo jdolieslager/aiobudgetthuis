@@ -26,7 +26,7 @@ from .models import (
 )
 from .prices import PRICE_GROSS, PRICE_NET, PriceData, PriceSlot
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "PRICE_GROSS",
