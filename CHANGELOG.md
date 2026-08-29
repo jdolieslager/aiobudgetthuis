@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-08-28
+
+### Changed
+
+- Data-endpoint error messages now carry only an endpoint label (e.g.
+  `monthlyAmount: status 500`) instead of the full request path, which embedded
+  the contract id; consumers routinely surface these messages in logs and
+  public issue reports.
+- Contract ids are URL-quoted when building request paths (defense in depth
+  for arbitrary caller-supplied values).
+
 ## [0.1.0] - 2026-08-26
 
 ### Added

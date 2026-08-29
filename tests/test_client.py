@@ -286,6 +286,14 @@ async def test_data_unauthorized_maps_to_auth_error(fake, client, status):
         await client.monthly_amount(ACCESS_TOKEN, "67890")
 
 
+async def test_data_error_message_omits_contract_id(fake, client):
+    fake.data_status = 500
+    with pytest.raises(BudgetThuisConnectionError) as err:
+        await client.monthly_amount(ACCESS_TOKEN, "67890")
+    assert "67890" not in str(err.value)
+    assert "monthlyAmount" in str(err.value)
+
+
 async def test_data_server_error_maps_to_connection_error(fake, client):
     fake.data_status = 500
     with pytest.raises(BudgetThuisConnectionError):
